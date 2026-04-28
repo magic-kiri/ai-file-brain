@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QFont, QKeyEvent
 from PySide6.QtWidgets import (
@@ -9,6 +11,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -87,6 +90,7 @@ class MainWindow(QWidget):
         self._vm = vm
         self._status_vm = status_vm
         self._is_quitting = False
+        self._change_folder_handler: Callable[[], None] | None = None
 
         self.setWindowTitle("AI File Brain")
         self.setMinimumSize(600, 500)
@@ -119,10 +123,29 @@ class MainWindow(QWidget):
 
         outer.addLayout(input_row)
 
+        status_strip = QWidget()
+        status_strip.setStyleSheet("background-color: #f0f0f0;")
+        status_layout = QHBoxLayout(status_strip)
+        status_layout.setContentsMargins(8, 4, 8, 4)
+        status_layout.setSpacing(8)
+
         self._status_label = QLabel(self._status_vm.render())
-        self._status_label.setContentsMargins(8, 4, 8, 4)
-        self._status_label.setStyleSheet("background-color: #f0f0f0; color: #333; font-size: 11px;")
-        outer.addWidget(self._status_label)
+        self._status_label.setStyleSheet("color: #333; font-size: 11px;")
+        self._status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        status_layout.addWidget(self._status_label, 1)
+
+        self._change_folder_button = QToolButton()
+        self._change_folder_button.setText("Change folder…")
+        self._change_folder_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._change_folder_button.setStyleSheet(
+            "QToolButton { color: #2c5282; font-size: 11px; padding: 0 6px;"
+            " background: transparent; border: none; }"
+            "QToolButton:hover { color: #1a365d; text-decoration: underline; }"
+        )
+        self._change_folder_button.clicked.connect(self._on_change_folder_clicked)
+        status_layout.addWidget(self._change_folder_button)
+
+        outer.addWidget(status_strip)
 
         vm.turn_appended.connect(self._on_turn_appended)
         vm.is_sending_changed.connect(self._on_sending_changed)
@@ -147,6 +170,9 @@ class MainWindow(QWidget):
     def mark_quitting(self) -> None:
         self._is_quitting = True
 
+    def set_change_folder_handler(self, handler: Callable[[], None]) -> None:
+        self._change_folder_handler = handler
+
     # ---- event handlers ----
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -164,6 +190,10 @@ class MainWindow(QWidget):
             self._vm.stop()
         else:
             self._vm.send()
+
+    def _on_change_folder_clicked(self) -> None:
+        if self._change_folder_handler is not None:
+            self._change_folder_handler()
 
     def _on_turn_appended(self, turn: ChatTurn) -> None:
         widget = _ChatTurnWidget(turn)

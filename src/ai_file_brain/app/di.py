@@ -143,6 +143,7 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
     tray_icon_service = TrayIconService(
         icon, _toggle, _show, _change_folder, _quit, status_vm
     )
+    main_window.set_change_folder_handler(_change_folder)
 
     return Container(
         settings=settings,
