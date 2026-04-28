@@ -61,3 +61,30 @@ class StatusBarViewModel(QObject):
             f"Watching {folder} · {self._chunk_count} chunks · "
             f"Ollama {ollama} · Chroma {chroma}"
         )
+
+    def render_html(self) -> str:
+        folder = self._watch_folder or "(none)"
+        return (
+            f'<span style="color:#4a5568;">Watching </span>'
+            f'<span style="color:#1a202c; font-weight:500;">{_escape(folder)}</span>'
+            f'<span style="color:#a0aec0;"> &nbsp;·&nbsp; </span>'
+            f'<span style="color:#1a202c; font-weight:500;">{self._chunk_count}</span>'
+            f'<span style="color:#4a5568;"> chunks</span>'
+            f'<span style="color:#a0aec0;"> &nbsp;·&nbsp; </span>'
+            f'{_dot(self._ollama_healthy)} <span style="color:#4a5568;">Ollama</span>'
+            f'<span style="color:#a0aec0;"> &nbsp;·&nbsp; </span>'
+            f'{_dot(self._chroma_healthy)} <span style="color:#4a5568;">Chroma</span>'
+        )
+
+
+def _dot(healthy: bool) -> str:
+    color = "#38a169" if healthy else "#e53e3e"
+    return f'<span style="color:{color}; font-size:14px;">●</span>'
+
+
+def _escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
