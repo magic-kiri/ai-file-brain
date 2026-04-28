@@ -15,6 +15,7 @@ class TrayIconService(QObject):
         icon: QIcon,
         toggle_window: Callable[[], None],
         show_window: Callable[[], None],
+        change_folder: Callable[[], None],
         quit_app: Callable[[], None],
         status: StatusBarViewModel,
         parent: QObject | None = None,
@@ -32,6 +33,10 @@ class TrayIconService(QObject):
         show_act = QAction("Show chat", menu)
         show_act.triggered.connect(show_window)
         menu.addAction(show_act)
+
+        change_act = QAction("Change watch folder…", menu)
+        change_act.triggered.connect(change_folder)
+        menu.addAction(change_act)
 
         pause_act = QAction("Pause indexing", menu)
         pause_act.setEnabled(False)

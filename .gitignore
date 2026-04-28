@@ -23,6 +23,7 @@ venv/
 
 # Local data
 chroma-data/
+user-settings.toml
 *.log
 
 # IDE

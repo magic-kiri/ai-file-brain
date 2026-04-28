@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
+from typing import Any
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, TomlConfigSettingsSource
+
+DEFAULTS_TOML = "settings.toml"
+USER_OVERRIDES_TOML = "user-settings.toml"
 
 
 class AiFileBrainSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AFB_",
-        toml_file="settings.toml",
         extra="ignore",
         case_sensitive=False,
     )
@@ -23,15 +27,53 @@ class AiFileBrainSettings(BaseSettings):
     top_k: int = 5
 
     @classmethod
-    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
-        from pydantic_settings import TomlConfigSettingsSource
-
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        # Priority (first wins): init args > env > user overrides > defaults file > secrets
         return (
             init_settings,
             env_settings,
-            TomlConfigSettingsSource(settings_cls),
+            TomlConfigSettingsSource(settings_cls, toml_file=USER_OVERRIDES_TOML),
+            TomlConfigSettingsSource(settings_cls, toml_file=DEFAULTS_TOML),
             file_secret_settings,
         )
 
     def chroma_path_resolved(self) -> Path:
         return Path(self.chroma_path).expanduser().resolve()
+
+
+def save_user_overrides(updates: dict[str, Any], path: str | Path = USER_OVERRIDES_TOML) -> Path:
+    """Merge ``updates`` into the user-overrides TOML and write it back.
+
+    Returns the resolved path that was written.
+    """
+    target = Path(path)
+    existing: dict[str, Any] = {}
+    if target.exists():
+        try:
+            existing = tomllib.loads(target.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            existing = {}
+    existing.update(updates)
+    target.write_text(_dump_flat_toml(existing), encoding="utf-8")
+    return target.resolve()
+
+
+def _dump_flat_toml(data: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for key in sorted(data):
+        value = data[key]
+        if isinstance(value, bool):
+            lines.append(f"{key} = {'true' if value else 'false'}")
+        elif isinstance(value, (int, float)):
+            lines.append(f"{key} = {value}")
+        else:
+            text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f'{key} = "{text}"')
+    return "\n".join(lines) + "\n"

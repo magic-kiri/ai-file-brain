@@ -6,11 +6,12 @@ from dataclasses import dataclass
 
 from ollama import AsyncClient
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from ai_file_brain.app.models.chat_turn import ChatTurn  # noqa: F401  (Qt meta)
 from ai_file_brain.app.services.health_check_service import HealthCheckService
 from ai_file_brain.app.services.tray_icon_service import TrayIconService
+from ai_file_brain.app.services.watch_folder_service import WatchFolderService
 from ai_file_brain.app.view_models.main_window_vm import MainWindowViewModel
 from ai_file_brain.app.view_models.status_bar_vm import StatusBarViewModel
 from ai_file_brain.app.views.main_window import MainWindow
@@ -40,6 +41,7 @@ class Container:
     main_window: MainWindow
     health_check: HealthCheckService
     tray: TrayIconService
+    watch_folder_service: WatchFolderService
 
     async def startup(self) -> None:
         try:
@@ -95,6 +97,7 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
                 pass
 
     watcher = FileWatcherService(settings, pipeline, vector_repo, progress=_progress)
+    watch_folder_service = WatchFolderService(settings, watcher, status_vm)
 
     tray_icon_service: TrayIconService | None = None
 
@@ -103,6 +106,26 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
 
     def _show() -> None:
         main_window.show_and_raise()
+
+    def _change_folder() -> None:
+        parent = main_window if main_window.isVisible() else None
+        chosen = QFileDialog.getExistingDirectory(
+            parent, "Choose folder to watch", settings.watch_folder
+        )
+        if not chosen:
+            return
+        asyncio.ensure_future(_apply_folder_change(chosen))
+
+    async def _apply_folder_change(path: str) -> None:
+        try:
+            await watch_folder_service.change_to(path)
+        except Exception as ex:
+            logger.exception("Failed to change watch folder")
+            QMessageBox.warning(
+                main_window,
+                "AI File Brain",
+                f"Couldn't switch watch folder:\n\n{ex}",
+            )
 
     def _quit() -> None:
         main_window.mark_quitting()
@@ -117,7 +140,9 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
         finally:
             app.quit()
 
-    tray_icon_service = TrayIconService(icon, _toggle, _show, _quit, status_vm)
+    tray_icon_service = TrayIconService(
+        icon, _toggle, _show, _change_folder, _quit, status_vm
+    )
 
     return Container(
         settings=settings,
@@ -134,6 +159,7 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
         main_window=main_window,
         health_check=health_check,
         tray=tray_icon_service,
+        watch_folder_service=watch_folder_service,
     )
 
 
