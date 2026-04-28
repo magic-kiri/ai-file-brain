@@ -1,0 +1,12 @@
+# Default settings for AI File Brain.
+# Override any value via environment variable: AFB_<UPPERCASE_FIELD>=...
+# Example: AFB_WATCH_FOLDER="D:/notes"
+
+watch_folder = "C:/Users/ASUS/Documents/AIFileBrainTest"
+ollama_url = "http://127.0.0.1:11434"
+chroma_path = "./chroma-data"
+embedding_model = "nomic-embed-text"
+chat_model = "llama3.2"
+chunk_size = 2000
+chunk_overlap = 400
+top_k = 5

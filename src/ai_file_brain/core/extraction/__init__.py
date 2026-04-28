@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import os
+from typing import Protocol, runtime_checkable
+
+from ai_file_brain.core.extraction.pdf import PdfExtractor
+from ai_file_brain.core.extraction.plain_text import PlainTextExtractor
+
+
+class UnsupportedFileTypeError(ValueError):
+    pass
+
+
+@runtime_checkable
+class TextExtractor(Protocol):
+    async def extract(self, file_path: str) -> str: ...
+
+
+_EXTRACTORS: dict[str, TextExtractor] = {
+    ".txt": PlainTextExtractor(),
+    ".pdf": PdfExtractor(),
+}
+
+SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(_EXTRACTORS)
+
+
+def get_extractor(file_path: str) -> TextExtractor:
+    ext = os.path.splitext(file_path)[1].lower()
+    extractor = _EXTRACTORS.get(ext)
+    if extractor is None:
+        raise UnsupportedFileTypeError(f"No extractor for extension '{ext}' (path={file_path!r})")
+    return extractor
+
+
+def is_supported(file_path: str) -> bool:
+    return os.path.splitext(file_path)[1].lower() in _EXTRACTORS
+
+
+__all__ = [
+    "SUPPORTED_EXTENSIONS",
+    "TextExtractor",
+    "UnsupportedFileTypeError",
+    "get_extractor",
+    "is_supported",
+]
