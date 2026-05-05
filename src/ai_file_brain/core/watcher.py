@@ -20,6 +20,7 @@ from watchdog.observers import Observer
 from ai_file_brain.config import AiFileBrainSettings
 from ai_file_brain.core.chunking import ChunkingService
 from ai_file_brain.core.embedding import EmbeddingService
+from ai_file_brain.core.exclusions import is_excluded
 from ai_file_brain.core.extraction import get_extractor, is_supported
 from ai_file_brain.core.models import FileChunk
 from ai_file_brain.core.storage import VectorRepository
@@ -197,18 +198,30 @@ class FileWatcherService:
 
     def _handle_event(self, kind: str, src: str, dst: str | None) -> None:
         if kind == "deleted":
+            # Always allow delete events through — even excluded paths may have
+            # stale chunks from a prior run with different exclusion settings.
             if is_supported(src):
                 self._schedule_task(self._handle_delete(src))
             return
         if kind == "moved":
-            if dst and is_supported(dst):
+            if dst and self._allowed(dst):
                 self._schedule_task(self._handle_rename(src, dst))
             elif is_supported(src):
+                # Source moved out of an allowed location → treat as delete.
                 self._schedule_task(self._handle_delete(src))
             return
         # created / modified
-        if is_supported(src):
+        if self._allowed(src):
             self._debounce_index(src)
+
+    def _allowed(self, path: str) -> bool:
+        if not is_supported(path):
+            return False
+        return not is_excluded(
+            path,
+            self._settings.excluded_dir_names,
+            self._settings.excluded_extensions,
+        )
 
     def _debounce_index(self, file_path: str) -> None:
         loop = self._loop
@@ -264,7 +277,7 @@ class FileWatcherService:
             if not path.is_file():
                 continue
             file_path = str(path)
-            if not is_supported(file_path):
+            if not self._allowed(file_path):
                 continue
             try:
                 already = await self._repo.has_path(file_path)

@@ -21,3 +21,29 @@ pdf_ocr_render_dpi = 220
 # Hard upper bound on per-file size before indexing. Skips runaway lockfiles,
 # generated bundles, etc. 10 MiB by default.
 max_file_size_bytes = 10485760
+
+# Smart exclusions: any path containing one of these directory names is
+# skipped (case-insensitive). Edit this list in user-settings.toml to add
+# project-specific noise without touching defaults.
+excluded_dir_names = [
+    "AppData",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".idea",
+    ".vscode",
+    "dist",
+    "build",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    "site-packages",
+    "Recycle.Bin",
+    "$RECYCLE.BIN",
+]
+
+excluded_extensions = [".lock", ".pyc", ".pyo", ".log", ".tmp", ".bak"]

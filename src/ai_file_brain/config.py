@@ -34,6 +34,43 @@ class AiFileBrainSettings(BaseSettings):
 
     max_file_size_bytes: int = 10 * 1024 * 1024
 
+    # Names of directories that, if they appear anywhere in a path, cause the
+    # file to be skipped. Case-insensitive. Designed for noisy / private dirs
+    # that no user wants indexed.
+    excluded_dir_names: list[str] = [
+        "AppData",
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".idea",
+        ".vscode",
+        "dist",
+        "build",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        "site-packages",
+        "Recycle.Bin",
+        "$RECYCLE.BIN",
+    ]
+
+    # Extensions that should never be indexed even if otherwise routable.
+    # Note: registered extractor extensions are the *positive* list; this is
+    # for extensions that aren't routed today but might be in the future, or
+    # when a user wants to defang an otherwise-routable extension.
+    excluded_extensions: list[str] = [
+        ".lock",
+        ".pyc",
+        ".pyo",
+        ".log",
+        ".tmp",
+        ".bak",
+    ]
+
     @classmethod
     def settings_customise_sources(
         cls,
