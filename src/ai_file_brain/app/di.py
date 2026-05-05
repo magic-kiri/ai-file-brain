@@ -81,7 +81,7 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
         chunk_overlap=settings.chunk_overlap,
     )
     chat = ChatService(settings, embedder, vector_repo, ollama)
-    pipeline = IndexingPipeline(chunker, embedder, vector_repo)
+    pipeline = IndexingPipeline(chunker, embedder, vector_repo, settings)
 
     status_vm = StatusBarViewModel()
     main_window_vm = MainWindowViewModel(chat)

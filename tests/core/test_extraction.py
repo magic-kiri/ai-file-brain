@@ -23,12 +23,20 @@ def test_is_supported():
     assert is_supported("g.tiff")
     assert is_supported("h.bmp")
     assert is_supported("i.webp")
-    assert not is_supported("j.docx")
+    assert is_supported("j.docx")
+    # Code / config — share PlainTextExtractor.
+    assert is_supported("k.py")
+    assert is_supported("l.JSON")
+    assert is_supported("m.yaml")
+    assert is_supported("n.toml")
+    assert is_supported("o.md")
+    assert not is_supported("p.exe")
+    assert not is_supported("q.doc")  # legacy binary format intentionally unsupported
 
 
 def test_unsupported_raises():
     with pytest.raises(UnsupportedFileTypeError):
-        get_extractor("/whatever/file.docx")
+        get_extractor("/whatever/file.exe")
 
 
 @pytest.mark.asyncio
@@ -45,6 +53,110 @@ async def test_plain_text_extractor_reads_file(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_pdf_extractor_returns_empty_for_missing_file(tmp_path: Path):
     fake = tmp_path / "missing.pdf"
+    extractor = get_extractor(str(fake))
+    result = await extractor.extract(str(fake))
+    assert result.text == ""
+    assert result.source == "native"
+
+
+# --- code / config files (share PlainTextExtractor) ---
+
+
+@pytest.mark.asyncio
+async def test_code_file_routes_to_plain_text(tmp_path: Path):
+    py_file = tmp_path / "snippet.py"
+    py_file.write_text("def hello():\n    return 'world'\n", encoding="utf-8")
+    extractor = get_extractor(str(py_file))
+    result = await extractor.extract(str(py_file))
+    assert result.source == "native"
+    assert "def hello" in result.text
+
+
+@pytest.mark.asyncio
+async def test_json_file_routes_to_plain_text(tmp_path: Path):
+    j = tmp_path / "config.json"
+    j.write_text('{"name": "ai-file-brain", "version": "0.2"}', encoding="utf-8")
+    extractor = get_extractor(str(j))
+    result = await extractor.extract(str(j))
+    assert result.source == "native"
+    assert "ai-file-brain" in result.text
+
+
+# --- docx ---
+
+
+def _make_docx(path: Path, paragraphs: list[str]) -> None:
+    from docx import Document
+
+    doc = Document()
+    for para in paragraphs:
+        doc.add_paragraph(para)
+    doc.save(str(path))
+
+
+def _make_docx_with_table_and_header(
+    path: Path, body: list[str], table: list[list[str]], header: str
+) -> None:
+    from docx import Document
+
+    doc = Document()
+    for para in body:
+        doc.add_paragraph(para)
+    if table:
+        rows = len(table)
+        cols = len(table[0])
+        t = doc.add_table(rows=rows, cols=cols)
+        for r, row_vals in enumerate(table):
+            for c, val in enumerate(row_vals):
+                t.cell(r, c).text = val
+    if header:
+        section = doc.sections[0]
+        section.header.paragraphs[0].text = header
+    doc.save(str(path))
+
+
+@pytest.mark.asyncio
+async def test_docx_extractor_reads_paragraphs(tmp_path: Path):
+    path = tmp_path / "simple.docx"
+    _make_docx(path, ["First paragraph.", "Second paragraph with detail."])
+    extractor = get_extractor(str(path))
+    result = await extractor.extract(str(path))
+    assert result.source == "native"
+    assert "First paragraph." in result.text
+    assert "Second paragraph with detail." in result.text
+
+
+@pytest.mark.asyncio
+async def test_docx_extractor_reads_tables_and_header(tmp_path: Path):
+    path = tmp_path / "rich.docx"
+    _make_docx_with_table_and_header(
+        path,
+        body=["Body text here."],
+        table=[["Header A", "Header B"], ["Cell A1", "Cell B1"]],
+        header="Confidential — internal only",
+    )
+    extractor = get_extractor(str(path))
+    result = await extractor.extract(str(path))
+    assert result.source == "native"
+    assert "Body text here." in result.text
+    assert "Header A" in result.text
+    assert "Cell B1" in result.text
+    assert "Confidential" in result.text
+
+
+@pytest.mark.asyncio
+async def test_docx_extractor_handles_corrupt_file(tmp_path: Path):
+    path = tmp_path / "broken.docx"
+    path.write_bytes(b"this is not a real docx")
+    extractor = get_extractor(str(path))
+    result = await extractor.extract(str(path))
+    assert result.text == ""
+    assert result.source == "native"
+
+
+@pytest.mark.asyncio
+async def test_docx_extractor_handles_missing_file(tmp_path: Path):
+    fake = tmp_path / "ghost.docx"
     extractor = get_extractor(str(fake))
     result = await extractor.extract(str(fake))
     assert result.text == ""

@@ -32,6 +32,8 @@ class AiFileBrainSettings(BaseSettings):
     pdf_ocr_per_page_min_chars: int = 10
     pdf_ocr_render_dpi: int = 220
 
+    max_file_size_bytes: int = 10 * 1024 * 1024
+
     @classmethod
     def settings_customise_sources(
         cls,

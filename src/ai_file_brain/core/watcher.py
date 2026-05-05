@@ -47,10 +47,12 @@ class IndexingPipeline:
         chunker: ChunkingService,
         embedder: EmbeddingService,
         repo: VectorRepository,
+        settings: AiFileBrainSettings,
     ) -> None:
         self._chunker = chunker
         self._embedder = embedder
         self._repo = repo
+        self._settings = settings
 
     async def index_file(self, file_path: str) -> int:
         if not is_supported(file_path):
@@ -83,6 +85,21 @@ class IndexingPipeline:
 
     async def _index_file_once(self, file_path: str) -> int:
         extractor = get_extractor(file_path)
+
+        try:
+            size = os.path.getsize(file_path)
+        except OSError:
+            return 0
+        if size > self._settings.max_file_size_bytes:
+            logger.info(
+                "Skipping %s: %d bytes exceeds max_file_size_bytes (%d)",
+                file_path,
+                size,
+                self._settings.max_file_size_bytes,
+            )
+            await self._repo.delete_by_path(file_path)
+            return 0
+
         result = await extractor.extract(file_path)
         if not result.text.strip():
             logger.info("No extractable text in %s; clearing prior chunks", file_path)
