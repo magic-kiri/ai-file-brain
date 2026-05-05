@@ -83,13 +83,13 @@ class IndexingPipeline:
 
     async def _index_file_once(self, file_path: str) -> int:
         extractor = get_extractor(file_path)
-        text = await extractor.extract(file_path)
-        if not text.strip():
+        result = await extractor.extract(file_path)
+        if not result.text.strip():
             logger.info("No extractable text in %s; clearing prior chunks", file_path)
             await self._repo.delete_by_path(file_path)
             return 0
 
-        text_chunks = self._chunker.chunk(text)
+        text_chunks = self._chunker.chunk(result.text)
         if not text_chunks:
             await self._repo.delete_by_path(file_path)
             return 0
@@ -112,6 +112,7 @@ class IndexingPipeline:
                 text=tc.text,
                 created_at=created,
                 modified_at=modified,
+                extraction_source=result.source,
             )
             embedding = await self._embedder.embed(tc.text)
             if not embedding:

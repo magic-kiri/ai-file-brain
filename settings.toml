@@ -10,3 +10,10 @@ chat_model = "llama3.2"
 chunk_size = 2000
 chunk_overlap = 400
 top_k = 5
+
+# OCR — image files and scanned-PDF fallback.
+ocr_enabled = true
+ocr_languages = ["en"]
+pdf_ocr_min_native_chars = 50      # below this total, switch to per-page OCR fallback
+pdf_ocr_per_page_min_chars = 10    # below this on a page, OCR that page
+pdf_ocr_render_dpi = 220

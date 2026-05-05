@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+
+from ai_file_brain.config import AiFileBrainSettings
+from ai_file_brain.core.models import FileChunk
+from ai_file_brain.core.storage import ChromaVectorRepository
+
+
+class _StubCollection:
+    def __init__(self) -> None:
+        self.last_metadatas: list[dict] | None = None
+
+    def upsert(self, ids, embeddings, documents, metadatas):
+        self.last_metadatas = list(metadatas)
+
+
+@pytest.mark.asyncio
+async def test_extraction_source_round_trips_through_metadata():
+    repo = ChromaVectorRepository(AiFileBrainSettings())
+    stub = _StubCollection()
+    repo._collection = stub  # bypass real chromadb init
+
+    now = datetime.now(UTC)
+    chunk_native = FileChunk(
+        id="a",
+        file_path="/p/native.txt",
+        file_name="native.txt",
+        chunk_index=0,
+        text="native body",
+        created_at=now,
+        modified_at=now,
+        extraction_source="native",
+    )
+    chunk_ocr = FileChunk(
+        id="b",
+        file_path="/p/scan.png",
+        file_name="scan.png",
+        chunk_index=0,
+        text="ocr body",
+        created_at=now,
+        modified_at=now,
+        extraction_source="ocr",
+    )
+
+    await repo.upsert_batch([chunk_native, chunk_ocr], [[0.1, 0.2], [0.3, 0.4]])
+
+    assert stub.last_metadatas is not None
+    assert stub.last_metadatas[0]["extraction_source"] == "native"
+    assert stub.last_metadatas[1]["extraction_source"] == "ocr"
+
+
+@pytest.mark.asyncio
+async def test_filechunk_default_extraction_source_is_native():
+    now = datetime.now(UTC)
+    chunk = FileChunk(
+        id="a",
+        file_path="/p/x.txt",
+        file_name="x.txt",
+        chunk_index=0,
+        text="x",
+        created_at=now,
+        modified_at=now,
+    )
+    assert chunk.extraction_source == "native"

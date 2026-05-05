@@ -3,6 +3,15 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Literal
+
+ExtractionSource = Literal["native", "ocr", "mixed"]
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionResult:
+    text: str
+    source: ExtractionSource = "native"
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +23,7 @@ class FileChunk:
     text: str
     created_at: datetime
     modified_at: datetime
+    extraction_source: ExtractionSource = "native"
 
     @staticmethod
     def make_id(file_path: str, chunk_index: int) -> str:

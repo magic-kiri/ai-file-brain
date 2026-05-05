@@ -13,6 +13,10 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.4",
     "aiofiles>=24.1",
+    "rapidocr-onnxruntime>=1.4",
+    "pymupdf>=1.24",
+    "pillow>=10.4",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +47,9 @@ asyncio_mode = "auto"
 addopts = "-q"
 filterwarnings = [
     "ignore::DeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow (e.g., OCR-touching). Deselect with -m 'not slow'.",
 ]
 
 [tool.ruff]

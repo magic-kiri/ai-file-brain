@@ -80,6 +80,7 @@ class ChromaVectorRepository:
                 "chunk_index": c.chunk_index,
                 "created_at": c.created_at.isoformat(),
                 "modified_at": c.modified_at.isoformat(),
+                "extraction_source": c.extraction_source,
             }
             for c in chunks
         ]

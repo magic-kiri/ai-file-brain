@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 from typing import Protocol, runtime_checkable
 
+from ai_file_brain.core.extraction.image import ImageExtractor
 from ai_file_brain.core.extraction.pdf import PdfExtractor
 from ai_file_brain.core.extraction.plain_text import PlainTextExtractor
+from ai_file_brain.core.models import ExtractionResult
 
 
 class UnsupportedFileTypeError(ValueError):
@@ -13,12 +15,20 @@ class UnsupportedFileTypeError(ValueError):
 
 @runtime_checkable
 class TextExtractor(Protocol):
-    async def extract(self, file_path: str) -> str: ...
+    async def extract(self, file_path: str) -> ExtractionResult: ...
 
 
+_image_extractor = ImageExtractor()
 _EXTRACTORS: dict[str, TextExtractor] = {
     ".txt": PlainTextExtractor(),
     ".pdf": PdfExtractor(),
+    ".png": _image_extractor,
+    ".jpg": _image_extractor,
+    ".jpeg": _image_extractor,
+    ".tiff": _image_extractor,
+    ".tif": _image_extractor,
+    ".bmp": _image_extractor,
+    ".webp": _image_extractor,
 }
 
 SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(_EXTRACTORS)
@@ -38,6 +48,7 @@ def is_supported(file_path: str) -> bool:
 
 __all__ = [
     "SUPPORTED_EXTENSIONS",
+    "ExtractionResult",
     "TextExtractor",
     "UnsupportedFileTypeError",
     "get_extractor",

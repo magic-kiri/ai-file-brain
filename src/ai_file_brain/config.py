@@ -26,6 +26,12 @@ class AiFileBrainSettings(BaseSettings):
     chunk_overlap: int = 400
     top_k: int = 5
 
+    ocr_enabled: bool = True
+    ocr_languages: list[str] = ["en"]
+    pdf_ocr_min_native_chars: int = 50
+    pdf_ocr_per_page_min_chars: int = 10
+    pdf_ocr_render_dpi: int = 220
+
     @classmethod
     def settings_customise_sources(
         cls,
