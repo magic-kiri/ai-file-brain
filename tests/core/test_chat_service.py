@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -73,7 +73,7 @@ async def test_ask_stream_yields_tokens_then_sources():
             chunk_index=0,
             text="content from a",
             distance=0.1,
-            modified_at=datetime.now(timezone.utc),
+            modified_at=datetime.now(UTC),
         ),
         QueryHit(
             chunk_id="2",

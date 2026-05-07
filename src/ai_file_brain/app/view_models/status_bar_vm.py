@@ -12,6 +12,7 @@ class StatusBarViewModel(QObject):
         self._chunk_count = 0
         self._ollama_healthy = False
         self._chroma_healthy = False
+        self._current_activity = ""
 
     @property
     def watch_folder(self) -> str:
@@ -51,6 +52,17 @@ class StatusBarViewModel(QObject):
     def chroma_healthy(self, v: bool) -> None:
         if v != self._chroma_healthy:
             self._chroma_healthy = v
+            self.changed.emit()
+
+    @property
+    def current_activity(self) -> str:
+        return self._current_activity
+
+    @current_activity.setter
+    def current_activity(self, v: str) -> None:
+        v = v or ""
+        if v != self._current_activity:
+            self._current_activity = v
             self.changed.emit()
 
     def render(self) -> str:

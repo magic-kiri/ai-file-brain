@@ -34,7 +34,4 @@ def is_excluded(
         return False
     parts = PurePath(file_path).parts
     # Skip the last part (the file name itself) — only directory components matter.
-    for part in parts[:-1]:
-        if part.lower() in excluded_dirs:
-            return True
-    return False
+    return any(part.lower() in excluded_dirs for part in parts[:-1])

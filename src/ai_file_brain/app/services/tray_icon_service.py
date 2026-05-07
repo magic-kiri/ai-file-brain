@@ -68,6 +68,6 @@ class TrayIconService(QObject):
         self._quit()
 
     def _refresh_tooltip(self) -> None:
-        self._tray.setToolTip(
-            f"AI File Brain — {self._status.chunk_count} chunks indexed"
-        )
+        base = f"AI File Brain — {self._status.chunk_count} chunks indexed"
+        activity = self._status.current_activity
+        self._tray.setToolTip(f"{base}\n{activity}" if activity else base)

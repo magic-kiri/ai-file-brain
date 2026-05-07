@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from ai_file_brain.app.models.chat_turn import ChatTurn  # noqa: F401  (Qt meta)
 from ai_file_brain.app.services.health_check_service import HealthCheckService
+from ai_file_brain.app.services.indexing_activity_service import IndexingActivityService
 from ai_file_brain.app.services.tray_icon_service import TrayIconService
 from ai_file_brain.app.services.watch_folder_service import WatchFolderService
 from ai_file_brain.app.view_models.main_window_vm import MainWindowViewModel
@@ -42,6 +43,7 @@ class Container:
     health_check: HealthCheckService
     tray: TrayIconService
     watch_folder_service: WatchFolderService
+    activity_service: IndexingActivityService
 
     async def startup(self) -> None:
         try:
@@ -87,6 +89,7 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
     main_window_vm = MainWindowViewModel(chat)
     main_window = MainWindow(main_window_vm, status_vm)
     health_check = HealthCheckService(ollama, vector_repo, status_vm, settings)
+    activity_service = IndexingActivityService(status_vm)
 
     def _progress(p: IndexingProgress) -> None:
         if p.state == "indexed":
@@ -95,6 +98,7 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
                 status_vm.chunk_count = status_vm.chunk_count + _maybe_chunk_delta(p.detail)
             except Exception:
                 pass
+        activity_service.on_progress(p)
 
     watcher = FileWatcherService(settings, pipeline, vector_repo, progress=_progress)
     watch_folder_service = WatchFolderService(settings, watcher, status_vm)
@@ -161,6 +165,7 @@ def build_container(settings: AiFileBrainSettings, qapp: QApplication, icon: QIc
         health_check=health_check,
         tray=tray_icon_service,
         watch_folder_service=watch_folder_service,
+        activity_service=activity_service,
     )
 
 

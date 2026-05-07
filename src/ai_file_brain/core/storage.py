@@ -5,8 +5,8 @@ import logging
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from ai_file_brain.core.models import FileChunk, QueryHit
 from ai_file_brain.config import AiFileBrainSettings
+from ai_file_brain.core.models import FileChunk, QueryHit
 
 logger = logging.getLogger(__name__)
 

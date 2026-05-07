@@ -3,7 +3,7 @@ from __future__ import annotations
 import calendar
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +40,9 @@ def parse_time_intent(question: str, *, now: datetime | None = None) -> TimeWind
     if not question:
         return None
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     elif now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
 
     q = question.lower()
 
@@ -129,11 +129,11 @@ def _start_of_week(day_start: datetime) -> datetime:
 
 
 def _bounds_of_month(year: int, month: int) -> tuple[datetime, datetime]:
-    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    start = datetime(year, month, 1, tzinfo=UTC)
     if month == 12:
-        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        end = datetime(year + 1, 1, 1, tzinfo=UTC)
     else:
-        end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+        end = datetime(year, month + 1, 1, tzinfo=UTC)
     return start, end
 
 

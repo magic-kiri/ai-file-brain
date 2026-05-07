@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ai_file_brain.core.exclusions import is_excluded
 
-
 DIRS = ["AppData", "node_modules", ".git", "__pycache__"]
 EXTS = [".lock", ".pyc"]
 
