@@ -21,7 +21,12 @@ class VectorRepository(Protocol):
         self, chunks: list[FileChunk], embeddings: list[list[float]]
     ) -> None: ...
     async def delete_by_path(self, file_path: str) -> None: ...
-    async def query(self, embedding: list[float], top_k: int) -> list[QueryHit]: ...
+    async def query(
+        self,
+        embedding: list[float],
+        top_k: int,
+        modified_at_range: tuple[datetime, datetime] | None = None,
+    ) -> list[QueryHit]: ...
     async def has_path(self, file_path: str) -> bool: ...
     async def count(self) -> int: ...
     async def heartbeat(self) -> bool: ...
@@ -97,13 +102,28 @@ class ChromaVectorRepository:
         col = self._require()
         await asyncio.to_thread(col.delete, where={"file_path": file_path})
 
-    async def query(self, embedding: list[float], top_k: int) -> list[QueryHit]:
+    async def query(
+        self,
+        embedding: list[float],
+        top_k: int,
+        modified_at_range: tuple[datetime, datetime] | None = None,
+    ) -> list[QueryHit]:
         col = self._require()
-        result = await asyncio.to_thread(
-            col.query,
-            query_embeddings=[embedding],
-            n_results=top_k,
-        )
+        kwargs: dict = {
+            "query_embeddings": [embedding],
+            "n_results": top_k,
+        }
+        if modified_at_range is not None:
+            start, end = modified_at_range
+            # ISO 8601 strings sort lexicographically by date, so $gte/$lte
+            # work directly on the stored "modified_at" string metadata.
+            kwargs["where"] = {
+                "$and": [
+                    {"modified_at": {"$gte": start.isoformat()}},
+                    {"modified_at": {"$lt": end.isoformat()}},
+                ]
+            }
+        result = await asyncio.to_thread(col.query, **kwargs)
         return _result_to_hits(result)
 
     async def has_path(self, file_path: str) -> bool:

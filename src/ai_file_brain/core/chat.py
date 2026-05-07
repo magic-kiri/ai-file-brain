@@ -15,6 +15,7 @@ from ai_file_brain.core.models import (
     TokenChunk,
 )
 from ai_file_brain.core.storage import VectorRepository
+from ai_file_brain.core.time_intent import TimeWindow, parse_time_intent
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +55,26 @@ class ChatService:
             yield SourcesChunk(paths=())
             return
 
+        window = parse_time_intent(question)
+
         embedding = await self._embedder.embed(question)
-        hits = await self._vector_repo.query(embedding, self._settings.top_k)
+        hits = await self._vector_repo.query(
+            embedding,
+            self._settings.top_k,
+            modified_at_range=(window.start, window.end) if window else None,
+        )
 
         if not hits:
-            yield TokenChunk(text="I couldn't find any relevant content in your files.")
+            if window is not None:
+                yield TokenChunk(
+                    text=f"I couldn't find any files modified during {window.label}."
+                )
+            else:
+                yield TokenChunk(text="I couldn't find any relevant content in your files.")
             yield SourcesChunk(paths=())
             return
 
-        user_message = _build_user_message(question, hits)
+        user_message = _build_user_message(question, hits, window)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
@@ -89,8 +101,15 @@ class ChatService:
         yield SourcesChunk(paths=tuple(seen))
 
 
-def _build_user_message(question: str, hits: list[QueryHit]) -> str:
+def _build_user_message(
+    question: str, hits: list[QueryHit], window: TimeWindow | None = None
+) -> str:
     blocks: list[str] = []
+    if window is not None:
+        blocks.append(
+            f"[Filtered to files modified during {window.label} "
+            f"({window.start.isoformat()} to {window.end.isoformat()})]"
+        )
     for hit in hits:
         modified = hit.modified_at.isoformat() if hit.modified_at else "unknown"
         blocks.append(
