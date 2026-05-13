@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ai_file_brain.core.time_intent import parse_time_intent
+from ai_file_brain.core.time_intent import parse_recency_intent, parse_time_intent
 
 # Anchor every test at a known reference. 2026-05-07 is a Thursday.
 NOW = datetime(2026, 5, 7, 14, 30, tzinfo=UTC)
@@ -127,3 +127,37 @@ def test_naive_now_is_treated_as_utc():
 )
 def test_punctuation_does_not_break_word_boundaries(phrase):
     assert parse_time_intent(phrase, now=NOW) is not None
+
+
+# ---- recency intent -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "phrase,expected_label",
+    [
+        ("what is the latest file I worked on?", "latest"),
+        ("show me the newest file", "newest"),
+        ("what is the most recent thing I edited", "most recent"),
+        ("most recently modified file", "most recent"),
+        ("what was the last thing I worked on", "latest"),
+        ("show me the last file in the index", "latest"),
+    ],
+)
+def test_recency_intent_recognised(phrase, expected_label):
+    intent = parse_recency_intent(phrase)
+    assert intent is not None
+    assert intent.label == expected_label
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "what did I work on yesterday",
+        "summarise this week",
+        "explain how chunking works",
+        "",
+        "   ",
+    ],
+)
+def test_no_recency_intent(phrase):
+    assert parse_recency_intent(phrase) is None

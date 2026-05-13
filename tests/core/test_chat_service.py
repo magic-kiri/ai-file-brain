@@ -18,9 +18,16 @@ class FakeEmbedder:
 
 
 class FakeRepo:
-    def __init__(self, hits: list[QueryHit]) -> None:
+    def __init__(
+        self,
+        hits: list[QueryHit],
+        recent_hits: list[QueryHit] | None = None,
+    ) -> None:
         self.hits = hits
+        self.recent_hits = recent_hits if recent_hits is not None else hits
         self.last_modified_at_range: tuple | None = None
+        self.most_recent_calls: list[int] = []
+        self.query_calls: int = 0
 
     async def initialize(self): ...
     async def upsert(self, *a, **kw): ...
@@ -34,15 +41,30 @@ class FakeRepo:
         return True
 
     async def query(self, embedding, top_k, modified_at_range=None):
+        self.query_calls += 1
         self.last_modified_at_range = modified_at_range
         return self.hits[:top_k]
+
+    async def most_recent(self, n: int) -> list[QueryHit]:
+        self.most_recent_calls.append(n)
+        return self.recent_hits[:n]
+
+    async def query_by_filename_substrings(
+        self, substrings: list[str], n: int
+    ) -> list[QueryHit]:
+        # Default fake: no filename matches. Individual tests can monkey-patch
+        # this on the instance when they want to verify the hybrid retrieval.
+        return []
 
 
 class FakeOllama:
     def __init__(self, tokens: list[str]) -> None:
         self.tokens = tokens
+        self.last_kwargs: dict[str, Any] | None = None
 
     async def chat(self, **kwargs: Any):
+        self.last_kwargs = kwargs
+
         async def gen():
             for tok in self.tokens:
                 yield {"message": {"content": tok}}
@@ -155,3 +177,143 @@ async def test_temporal_no_hits_uses_window_specific_message():
     chunks = [c async for c in chat.ask_stream("what changed last week?")]
     tokens = [c for c in chunks if isinstance(c, TokenChunk)]
     assert any("last week" in t.text for t in tokens)
+
+
+@pytest.mark.asyncio
+async def test_recency_question_calls_most_recent_not_query():
+    recent = [
+        QueryHit("1", "/new.txt", "new.txt", 0, "fresh", 0.0, datetime(2026, 5, 10, tzinfo=UTC)),
+        QueryHit("2", "/old.txt", "old.txt", 0, "stale", 0.0, datetime(2026, 4, 1, tzinfo=UTC)),
+    ]
+    repo = FakeRepo(hits=[], recent_hits=recent)
+    chat = ChatService(_settings(), FakeEmbedder(), repo, FakeOllama(["new.txt"]))
+
+    result = await chat.ask("what is the latest file I worked on?")
+
+    assert repo.most_recent_calls == [3]   # top_k=3 from _settings()
+    assert repo.query_calls == 0           # embedding-similarity path not taken
+    assert result.sources == ("/new.txt", "/old.txt")
+
+
+@pytest.mark.asyncio
+async def test_recency_no_hits_returns_helpful_message():
+    repo = FakeRepo(hits=[], recent_hits=[])
+    chat = ChatService(_settings(), FakeEmbedder(), repo, FakeOllama([]))
+    chunks = [c async for c in chat.ask_stream("show me the most recent files")]
+    tokens = [c for c in chunks if isinstance(c, TokenChunk)]
+    assert any("haven't indexed" in t.text for t in tokens)
+
+
+@pytest.mark.asyncio
+async def test_recency_branch_uses_relaxed_system_prompt():
+    recent = [QueryHit("1", "/x.txt", "x.txt", 0, "x", 0.0, datetime(2026, 5, 10, tzinfo=UTC))]
+    repo = FakeRepo(hits=[], recent_hits=recent)
+    ollama = FakeOllama(["ok"])
+    chat = ChatService(_settings(), FakeEmbedder(), repo, ollama)
+    await chat.ask("what is the latest file I worked on?")
+    assert ollama.last_kwargs is not None
+    system_msg = ollama.last_kwargs["messages"][0]
+    assert system_msg["role"] == "system"
+    # Relaxed prompt that lets the model answer from filename + date metadata.
+    assert "modified" in system_msg["content"].lower()
+    assert "newest first" in system_msg["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_history_passes_prior_turns_into_followup():
+    """Second turn must include the first turn's user+assistant in messages."""
+    hits = [QueryHit("1", "/a.txt", "a.txt", 0, "stuff about widgets", 0.1, None)]
+    repo = FakeRepo(hits=hits)
+    ollama = FakeOllama(["first answer"])
+    chat = ChatService(_settings(), FakeEmbedder(), repo, ollama)
+
+    # Turn 1
+    await chat.ask("what is in a.txt?")
+    first_kwargs = ollama.last_kwargs
+    assert first_kwargs is not None
+    assert len(first_kwargs["messages"]) == 2  # system + user
+
+    # Turn 2 — same ChatService instance
+    ollama.tokens = ["second answer"]
+    await chat.ask("tell me more about it")
+    second_kwargs = ollama.last_kwargs
+    assert second_kwargs is not None
+    roles = [m["role"] for m in second_kwargs["messages"]]
+    # system, user(turn1), assistant(turn1), user(turn2)
+    assert roles == ["system", "user", "assistant", "user"]
+    # Assistant message in history is the full text of the prior answer.
+    assert second_kwargs["messages"][2]["content"] == "first answer"
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_not_recorded_in_history():
+    """A turn that errored mid-stream shouldn't poison the history."""
+    hits = [QueryHit("1", "/a.txt", "a.txt", 0, "x", 0.1, None)]
+    repo = FakeRepo(hits=hits)
+
+    class BoomOllama:
+        last_kwargs = None
+
+        async def chat(self, **kwargs):
+            BoomOllama.last_kwargs = kwargs
+            raise RuntimeError("boom")
+
+    chat = ChatService(_settings(), FakeEmbedder(), repo, BoomOllama())
+    await chat.ask("first?")  # errors mid-stream
+
+    # Replace with a normal client and try a second turn
+    good = FakeOllama(["ok"])
+    chat._ollama = good  # type: ignore[attr-defined]
+    await chat.ask("second?")
+    roles = [m["role"] for m in good.last_kwargs["messages"]]
+    # Failed first turn should NOT appear in history: just system + new user.
+    assert roles == ["system", "user"]
+
+
+@pytest.mark.asyncio
+async def test_clear_history_resets_state():
+    hits = [QueryHit("1", "/a.txt", "a.txt", 0, "x", 0.1, None)]
+    repo = FakeRepo(hits=hits)
+    ollama = FakeOllama(["one"])
+    chat = ChatService(_settings(), FakeEmbedder(), repo, ollama)
+
+    await chat.ask("turn one")
+    chat.clear_history()
+
+    ollama.tokens = ["two"]
+    await chat.ask("turn two")
+    roles = [m["role"] for m in ollama.last_kwargs["messages"]]
+    assert roles == ["system", "user"]
+
+
+@pytest.mark.asyncio
+async def test_history_capped_to_max_turns():
+    """Bounded history prevents context-window blowup."""
+    from ai_file_brain.core import chat as chat_module
+
+    hits = [QueryHit("1", "/a.txt", "a.txt", 0, "x", 0.1, None)]
+    repo = FakeRepo(hits=hits)
+    ollama = FakeOllama(["a"])
+    chat = ChatService(_settings(), FakeEmbedder(), repo, ollama)
+
+    # Run MAX + 3 turns
+    n_turns = chat_module.MAX_HISTORY_TURNS + 3
+    for i in range(n_turns):
+        ollama.tokens = [f"answer-{i}"]
+        await chat.ask(f"question {i}")
+
+    # On the last turn, history should have at most MAX_HISTORY_TURNS prior turns
+    # = MAX_HISTORY_TURNS * 2 messages, PLUS system + new user = +2.
+    final_messages = ollama.last_kwargs["messages"]
+    assert len(final_messages) <= chat_module.MAX_HISTORY_TURNS * 2 + 2
+
+
+@pytest.mark.asyncio
+async def test_recency_intent_beats_time_window():
+    # "latest" should pick recency, not interpret "last 7 days" or similar.
+    recent = [QueryHit("1", "/x.txt", "x.txt", 0, "x", 0.0, datetime(2026, 5, 10, tzinfo=UTC))]
+    repo = FakeRepo(hits=[], recent_hits=recent)
+    chat = ChatService(_settings(), FakeEmbedder(), repo, FakeOllama(["ok"]))
+    await chat.ask("what is the latest thing I worked on today?")
+    assert repo.most_recent_calls == [3]
+    assert repo.last_modified_at_range is None  # not routed through window filter

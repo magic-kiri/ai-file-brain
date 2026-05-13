@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -148,7 +149,7 @@ QLabel#StatusLabel {{
     color: {PALETTE['text_muted']};
     font-size: 11px;
 }}
-QToolButton#ChangeFolderButton {{
+QToolButton#ChangeFolderButton, QToolButton#CopyConversationButton {{
     background-color: {PALETTE['surface']};
     color: {PALETTE['accent']};
     border: 1px solid {PALETTE['border']};
@@ -157,13 +158,18 @@ QToolButton#ChangeFolderButton {{
     font-size: 11px;
     font-weight: 500;
 }}
-QToolButton#ChangeFolderButton:hover {{
+QToolButton#ChangeFolderButton:hover, QToolButton#CopyConversationButton:hover {{
     background-color: {PALETTE['accent']};
     color: {PALETTE['accent_text']};
     border-color: {PALETTE['accent']};
 }}
-QToolButton#ChangeFolderButton:pressed {{
+QToolButton#ChangeFolderButton:pressed, QToolButton#CopyConversationButton:pressed {{
     background-color: {PALETTE['accent_hover']};
+}}
+QToolButton#CopyConversationButton:disabled {{
+    background-color: {PALETTE['surface_alt']};
+    color: {PALETTE['text_subtle']};
+    border-color: {PALETTE['border']};
 }}
 """
 
@@ -308,6 +314,14 @@ class MainWindow(QWidget):
         self._status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         status_layout.addWidget(self._status_label, 1)
 
+        self._copy_button = QToolButton()
+        self._copy_button.setObjectName("CopyConversationButton")
+        self._copy_button.setText("Copy")
+        self._copy_button.setToolTip("Copy the whole conversation to the clipboard")
+        self._copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_button.clicked.connect(self._on_copy_clicked)
+        status_layout.addWidget(self._copy_button)
+
         self._change_folder_button = QToolButton()
         self._change_folder_button.setObjectName("ChangeFolderButton")
         self._change_folder_button.setText("Change folder…")
@@ -364,6 +378,32 @@ class MainWindow(QWidget):
     def _on_change_folder_clicked(self) -> None:
         if self._change_folder_handler is not None:
             self._change_folder_handler()
+
+    def _on_copy_clicked(self) -> None:
+        transcript = self._build_transcript()
+        if not transcript:
+            return
+        QApplication.clipboard().setText(transcript)
+        self._copy_button.setText("Copied ✓")
+        self._copy_button.setEnabled(False)
+        QTimer.singleShot(1200, self._restore_copy_button)
+
+    def _restore_copy_button(self) -> None:
+        self._copy_button.setText("Copy")
+        self._copy_button.setEnabled(True)
+
+    def _build_transcript(self) -> str:
+        lines: list[str] = []
+        for turn in self._vm.turns:
+            lines.append(f"You: {turn.question}")
+            if turn.answer:
+                lines.append(f"AI: {turn.answer}")
+            if turn.sources:
+                lines.append("Sources: " + " · ".join(turn.sources))
+            if turn.error:
+                lines.append(f"Error: {turn.error}")
+            lines.append("")
+        return "\n".join(lines).rstrip()
 
     def _on_turn_appended(self, turn: ChatTurn) -> None:
         if self._empty_label is not None:

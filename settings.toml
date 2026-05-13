@@ -46,4 +46,4 @@ excluded_dir_names = [
     "$RECYCLE.BIN",
 ]
 
-excluded_extensions = [".lock", ".pyc", ".pyo", ".log", ".tmp", ".bak"]
+excluded_extensions = [".lock", ".pyc", ".pyo", ".log", ".tmp", ".bak", ".ps1"]

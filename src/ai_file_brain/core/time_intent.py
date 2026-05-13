@@ -19,7 +19,45 @@ class TimeWindow:
     label: str
 
 
+@dataclass(frozen=True, slots=True)
+class RecencyIntent:
+    """Marker that the user asked about the most-recently modified files.
+
+    Carries the spoken label (e.g. ``"latest"``) so it can be surfaced back.
+    """
+
+    label: str
+
+
 _MONTH_NAMES = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
+
+
+# Words/phrases that mean "sort by modified_at desc, give me the top few".
+# Order matters for label selection — first match wins.
+_RECENCY_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\bmost\s+recent(?:ly)?\b", "most recent"),
+    (r"\brecently\s+(?:modified|updated|edited|worked|changed)\b", "most recent"),
+    (r"\blatest\b", "latest"),
+    (r"\bnewest\b", "newest"),
+    (r"\blast\s+(?:file|files|thing|things|one|ones)\b", "latest"),
+)
+
+
+def parse_recency_intent(question: str) -> RecencyIntent | None:
+    """Return a ``RecencyIntent`` when the user is asking about the freshest
+    files (e.g. *what is the latest file I worked on?*), else ``None``.
+
+    Recency is distinct from a :class:`TimeWindow`: it doesn't bound a
+    time range, it asks for "sort by modified_at desc" instead. The chat
+    layer branches on this so retrieval skips embedding similarity entirely.
+    """
+    if not question:
+        return None
+    q = question.lower()
+    for pattern, label in _RECENCY_PATTERNS:
+        if re.search(pattern, q):
+            return RecencyIntent(label=label)
+    return None
 
 
 def parse_time_intent(question: str, *, now: datetime | None = None) -> TimeWindow | None:

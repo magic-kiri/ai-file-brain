@@ -27,6 +27,10 @@ class VectorRepository(Protocol):
         top_k: int,
         modified_at_range: tuple[datetime, datetime] | None = None,
     ) -> list[QueryHit]: ...
+    async def most_recent(self, n: int) -> list[QueryHit]: ...
+    async def query_by_filename_substrings(
+        self, substrings: list[str], n: int
+    ) -> list[QueryHit]: ...
     async def has_path(self, file_path: str) -> bool: ...
     async def count(self) -> int: ...
     async def heartbeat(self) -> bool: ...
@@ -126,6 +130,46 @@ class ChromaVectorRepository:
         result = await asyncio.to_thread(col.query, **kwargs)
         return _result_to_hits(result)
 
+    async def most_recent(self, n: int) -> list[QueryHit]:
+        """Return up to ``n`` chunks, sorted by ``modified_at`` desc, deduped by file_path.
+
+        Used for "what's the latest file I worked on?" — pulls metadata + docs
+        and sorts in Python because Chroma can't ``order by`` metadata. Scans
+        every chunk, so cost is O(N) where N is the collection size. Fine
+        until N gets into the hundreds of thousands.
+        """
+        if n <= 0:
+            return []
+        col = self._require()
+        result = await asyncio.to_thread(
+            col.get,
+            include=["metadatas", "documents"],
+        )
+        return _sort_dedupe_most_recent(result, n)
+
+    async def query_by_filename_substrings(
+        self, substrings: list[str], n: int
+    ) -> list[QueryHit]:
+        """Return up to ``n`` chunks whose ``file_name`` contains any of the
+        given substrings (case-insensitive). One chunk per matched file, the
+        lowest-index chunk first.
+
+        Used for "tell me about <name>" — embeddings can't link a query word
+        like "screenshot" to a file whose chunk text doesn't contain it (think
+        OCR'd images), but filename matching reliably surfaces the file.
+        """
+        if not substrings or n <= 0:
+            return []
+        needles = [s.lower() for s in substrings if s]
+        if not needles:
+            return []
+        col = self._require()
+        result = await asyncio.to_thread(
+            col.get,
+            include=["metadatas", "documents"],
+        )
+        return _filter_by_filename(result, needles, n)
+
     async def has_path(self, file_path: str) -> bool:
         col = self._require()
         result = await asyncio.to_thread(
@@ -150,6 +194,88 @@ class ChromaVectorRepository:
         except Exception as ex:
             logger.debug("Chroma heartbeat failed: %s", ex)
             return False
+
+
+def _filter_by_filename(result: dict, needles: list[str], n: int) -> list[QueryHit]:
+    ids = result.get("ids") or []
+    documents = result.get("documents") or [""] * len(ids)
+    metadatas = result.get("metadatas") or [{}] * len(ids)
+
+    # Pick the lowest-chunk-index match per file so we get the start of the file,
+    # not an arbitrary chunk somewhere inside.
+    best_per_path: dict[str, tuple[int, QueryHit]] = {}
+    for i, chunk_id in enumerate(ids):
+        meta = metadatas[i] or {}
+        file_name = str(meta.get("file_name", ""))
+        file_path = str(meta.get("file_path", ""))
+        if not file_name or not file_path:
+            continue
+        name_lower = file_name.lower()
+        if not any(needle in name_lower for needle in needles):
+            continue
+        chunk_index = int(meta.get("chunk_index", 0) or 0)
+        existing = best_per_path.get(file_path)
+        if existing is not None and existing[0] <= chunk_index:
+            continue
+        modified_iso = meta.get("modified_at")
+        modified_at = None
+        if isinstance(modified_iso, str):
+            try:
+                modified_at = datetime.fromisoformat(modified_iso)
+            except ValueError:
+                modified_at = None
+        hit = QueryHit(
+            chunk_id=chunk_id,
+            file_path=file_path,
+            file_name=file_name,
+            chunk_index=chunk_index,
+            text=documents[i] or "",
+            distance=0.0,
+            modified_at=modified_at,
+        )
+        best_per_path[file_path] = (chunk_index, hit)
+
+    return [hit for _index, hit in best_per_path.values()][:n]
+
+
+def _sort_dedupe_most_recent(result: dict, n: int) -> list[QueryHit]:
+    ids = result.get("ids") or []
+    documents = result.get("documents") or [""] * len(ids)
+    metadatas = result.get("metadatas") or [{}] * len(ids)
+
+    items: list[tuple[datetime, str, QueryHit]] = []
+    for i, chunk_id in enumerate(ids):
+        meta = metadatas[i] or {}
+        modified_iso = meta.get("modified_at")
+        if not isinstance(modified_iso, str):
+            continue
+        try:
+            modified_at = datetime.fromisoformat(modified_iso)
+        except ValueError:
+            continue
+        file_path = str(meta.get("file_path", ""))
+        hit = QueryHit(
+            chunk_id=chunk_id,
+            file_path=file_path,
+            file_name=str(meta.get("file_name", "")),
+            chunk_index=int(meta.get("chunk_index", 0) or 0),
+            text=documents[i] or "",
+            distance=0.0,
+            modified_at=modified_at,
+        )
+        items.append((modified_at, file_path, hit))
+
+    items.sort(key=lambda x: x[0], reverse=True)
+    seen: set[str] = set()
+    hits: list[QueryHit] = []
+    for _modified, file_path, hit in items:
+        if file_path in seen:
+            continue
+        seen.add(file_path)
+        hits.append(hit)
+        if len(hits) >= n:
+            break
+    return hits
 
 
 def _result_to_hits(result: dict) -> list[QueryHit]:
