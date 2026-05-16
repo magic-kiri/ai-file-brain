@@ -80,14 +80,22 @@ async def test_pipeline_skips_files_over_size_cap(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pipeline_skips_unsupported_extension(tmp_path: Path):
+async def test_pipeline_indexes_unsupported_extension_as_filename_only(tmp_path: Path):
+    """Files we can't extract text from still get a tiny filename-only chunk so
+    "do I have files about X" can still find them. The chunk is excluded from
+    semantic search via the extraction_source metadata filter in the repo."""
     settings = AiFileBrainSettings()
     pipeline, repo = _build_pipeline(settings)
 
-    f = tmp_path / "binary.exe"
-    f.write_bytes(b"MZ\x90\x00")  # would-be PE header
+    f = tmp_path / "mcfcoreinstaller.zip"
+    f.write_bytes(b"PK\x03\x04")  # would-be ZIP header
 
     count = await pipeline.index_file(str(f))
-    assert count == 0
-    assert repo.upserted == []
-    assert repo.deletions == []  # never even reached the extractor
+    assert count == 1
+    assert len(repo.upserted) == 1
+    chunk = repo.upserted[0]
+    assert chunk.extraction_source == "filename_only"
+    assert chunk.file_name == "mcfcoreinstaller.zip"
+    # The chunk text is the filename itself so it has *something* to embed and
+    # so the chunk-level document is non-empty.
+    assert chunk.text == "mcfcoreinstaller.zip"

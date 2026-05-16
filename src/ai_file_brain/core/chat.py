@@ -43,17 +43,22 @@ _STOPWORDS = frozenset({
     "from", "into", "by", "at", "as", "but", "if", "then", "than",
     "can", "could", "should", "would", "will", "shall",
     "please", "thanks", "thank",
+    # Common 3-char English fillers — kept here (not added at len>=3 cutoff
+    # below) so we don't substring-match them against random filenames.
+    "use", "new", "old", "let", "got", "say", "see", "way", "yet", "via",
+    "per", "lot", "etc", "now", "one", "two", "ten",
 })
 
 
 def _filename_keywords(question: str) -> list[str]:
     """Extract content words from a question for filename-substring matching.
 
-    Returns lowercase tokens of length >= 4 that aren't stopwords. Short
-    questions like "tell me about the screenshot" → ``["screenshot"]``.
+    Returns lowercase tokens of length >= 3 that aren't stopwords. The 3-char
+    floor lets short acronyms / project codenames ("api", "csv", "mcf", "rfc")
+    surface; common 3-char English fillers are screened by ``_STOPWORDS``.
     """
     tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]+", question.lower())
-    return [t for t in tokens if len(t) >= 4 and t not in _STOPWORDS]
+    return [t for t in tokens if len(t) >= 3 and t not in _STOPWORDS]
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +68,11 @@ SYSTEM_PROMPT = (
     "or facts already established earlier in this conversation. The user may refer "
     "to things from prior turns (e.g. 'the third one', 'that file') — resolve such "
     "references using the conversation so far. If the answer is in neither the new "
-    "excerpts nor the prior conversation, say so."
+    "excerpts nor the prior conversation, say so.\n"
+    "Some entries are marked 'filename only' — those files exist on the user's "
+    "machine but their contents are not indexed (typically archives, executables, "
+    "media, or other binaries). For those, acknowledge that the file exists and "
+    "give the filename, but do not invent any contents or summary for them."
 )
 
 # Recency questions are answered from the file *metadata* (filename + modified
@@ -254,9 +263,15 @@ def _build_user_message(
         )
     for hit in hits:
         modified = hit.modified_at.isoformat() if hit.modified_at else "unknown"
-        blocks.append(
-            f"--- File: {hit.file_name} (modified: {modified}) ---\n{hit.text}"
-        )
+        if hit.extraction_source == "filename_only":
+            blocks.append(
+                f"--- File: {hit.file_name} "
+                f"(filename only — contents not indexed, modified: {modified}) ---"
+            )
+        else:
+            blocks.append(
+                f"--- File: {hit.file_name} (modified: {modified}) ---\n{hit.text}"
+            )
     blocks.append("")
     blocks.append(f"Question: {question}")
     return "\n\n".join(blocks)

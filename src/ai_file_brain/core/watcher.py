@@ -56,11 +56,15 @@ class IndexingPipeline:
         self._settings = settings
 
     async def index_file(self, file_path: str) -> int:
-        if not is_supported(file_path):
-            return 0
         for attempt, backoff in enumerate(RETRY_BACKOFF_SECONDS, start=1):
             try:
-                return await self._index_file_once(file_path)
+                if is_supported(file_path):
+                    return await self._index_supported_once(file_path)
+                # Unsupported extension (.zip, .exe, .mp4 …): store a tiny
+                # filename-only stub so substring search ("do I have files
+                # about <X>") can still find it. Excluded from semantic
+                # search via metadata filter in the repo layer.
+                return await self._index_filename_only_once(file_path)
             except FileNotFoundError:
                 logger.info("File disappeared before indexing: %s", file_path)
                 return 0
@@ -84,7 +88,38 @@ class IndexingPipeline:
                 await asyncio.sleep(backoff)
         return 0
 
-    async def _index_file_once(self, file_path: str) -> int:
+    async def _index_filename_only_once(self, file_path: str) -> int:
+        try:
+            stat = os.stat(file_path)
+        except OSError:
+            return 0
+        file_name = os.path.basename(file_path)
+        if not file_name:
+            return 0
+        modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        created = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)
+
+        # Embed the filename itself so the vector has the right dimension for
+        # the collection; semantic queries filter these out by extraction_source.
+        embedding = await self._embedder.embed(file_name)
+        if not embedding:
+            return 0
+
+        chunk = FileChunk(
+            id=FileChunk.make_id(file_path, 0),
+            file_path=file_path,
+            file_name=file_name,
+            chunk_index=0,
+            text=file_name,
+            created_at=created,
+            modified_at=modified,
+            extraction_source="filename_only",
+        )
+        await self._repo.delete_by_path(file_path)
+        await self._repo.upsert_batch([chunk], [embedding])
+        return 1
+
+    async def _index_supported_once(self, file_path: str) -> int:
         extractor = get_extractor(file_path)
 
         try:
@@ -198,25 +233,26 @@ class FileWatcherService:
 
     def _handle_event(self, kind: str, src: str, dst: str | None) -> None:
         if kind == "deleted":
-            # Always allow delete events through — even excluded paths may have
-            # stale chunks from a prior run with different exclusion settings.
-            if is_supported(src):
-                self._schedule_task(self._handle_delete(src))
+            # Always emit a delete — even excluded paths may have stale chunks
+            # from a prior run with different settings, and the repo's delete is
+            # a no-op when there's nothing to remove.
+            self._schedule_task(self._handle_delete(src))
             return
         if kind == "moved":
-            if dst and self._allowed(dst):
+            if dst and self._should_track(dst):
                 self._schedule_task(self._handle_rename(src, dst))
-            elif is_supported(src):
-                # Source moved out of an allowed location → treat as delete.
+            else:
+                # Source moved out of a tracked location → treat as delete.
                 self._schedule_task(self._handle_delete(src))
             return
         # created / modified
-        if self._allowed(src):
+        if self._should_track(src):
             self._debounce_index(src)
 
-    def _allowed(self, path: str) -> bool:
-        if not is_supported(path):
-            return False
+    def _should_track(self, path: str) -> bool:
+        """Any non-excluded file is tracked. Files without a text extractor get
+        a filename-only stub in the index so substring search can still find
+        them."""
         return not is_excluded(
             path,
             self._settings.excluded_dir_names,
@@ -277,7 +313,7 @@ class FileWatcherService:
             if not path.is_file():
                 continue
             file_path = str(path)
-            if not self._allowed(file_path):
+            if not self._should_track(file_path):
                 continue
             try:
                 already = await self._repo.has_path(file_path)

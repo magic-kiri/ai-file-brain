@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
-ExtractionSource = Literal["native", "ocr", "mixed"]
+ExtractionSource = Literal["native", "ocr", "mixed", "filename_only"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +40,7 @@ class QueryHit:
     text: str
     distance: float
     modified_at: datetime | None = None
+    extraction_source: ExtractionSource = "native"
 
 
 # --- streaming chat: discriminated union ---

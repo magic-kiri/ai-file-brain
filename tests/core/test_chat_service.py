@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from ai_file_brain.config import AiFileBrainSettings
-from ai_file_brain.core.chat import ChatService
+from ai_file_brain.core.chat import ChatService, _filename_keywords
 from ai_file_brain.core.models import (
     QueryHit,
     SourcesChunk,
@@ -354,6 +354,53 @@ async def test_history_capped_to_max_turns():
     # = MAX_HISTORY_TURNS * 2 messages, PLUS system + new user = +2.
     final_messages = ollama.last_kwargs["messages"]
     assert len(final_messages) <= chat_module.MAX_HISTORY_TURNS * 2 + 2
+
+
+def test_filename_keywords_keeps_three_char_acronyms_and_codenames():
+    """3-char tokens like project codenames and acronyms must surface so users
+    can ask 'do I have files on mcf core' and find 'mcfcoreinstaller.zip'."""
+    kws = _filename_keywords("do I have files on mcf core?")
+    assert "mcf" in kws
+    assert "core" in kws
+
+
+def test_filename_keywords_filters_common_three_char_fillers():
+    """Generic 3-char English words shouldn't substring-match random filenames."""
+    kws = _filename_keywords("show me the new files I can see")
+    assert "new" not in kws
+    assert "see" not in kws
+    assert "use" not in kws  # not in this prompt but verify the rule
+    # 'files' is content-bearing and stays
+    assert "files" in kws
+
+
+@pytest.mark.asyncio
+async def test_filename_only_hit_rendered_without_body_in_prompt():
+    """Filename-only hits must not have a content body in the LLM prompt — they
+    have no real text to include, only the filename + modified date."""
+    hits = [
+        QueryHit(
+            chunk_id="1",
+            file_path="/p/mcfcoreinstaller.zip",
+            file_name="mcfcoreinstaller.zip",
+            chunk_index=0,
+            text="mcfcoreinstaller.zip",  # placeholder = filename
+            distance=0.0,
+            modified_at=datetime(2026, 5, 1, tzinfo=UTC),
+            extraction_source="filename_only",
+        )
+    ]
+    ollama = FakeOllama(["ok"])
+    chat = ChatService(_settings(), FakeEmbedder(), FakeRepo(hits), ollama)
+    await chat.ask("do I have files on mcf core?")
+
+    msgs = ollama.last_kwargs["messages"]
+    user_msg = msgs[-1]["content"]
+    assert "filename only" in user_msg.lower()
+    assert "mcfcoreinstaller.zip" in user_msg
+    # System prompt should warn the model about filename-only entries.
+    system_msg = msgs[0]["content"]
+    assert "filename only" in system_msg.lower()
 
 
 @pytest.mark.asyncio

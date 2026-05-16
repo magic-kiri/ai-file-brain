@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "ai-file-brain"
 
+# Filename-only chunks (extension types we can't extract: .zip, .exe, .mp4 …) are
+# excluded from semantic search so they don't compete with content-bearing
+# chunks. They still show up via query_by_filename_substrings and most_recent.
+_NOT_FILENAME_ONLY_CLAUSE = {"extraction_source": {"$ne": "filename_only"}}
+
 
 @runtime_checkable
 class VectorRepository(Protocol):
@@ -113,20 +118,18 @@ class ChromaVectorRepository:
         modified_at_range: tuple[datetime, datetime] | None = None,
     ) -> list[QueryHit]:
         col = self._require()
-        kwargs: dict = {
-            "query_embeddings": [embedding],
-            "n_results": top_k,
-        }
+        where_clauses: list[dict] = [_NOT_FILENAME_ONLY_CLAUSE]
         if modified_at_range is not None:
             start, end = modified_at_range
             # ISO 8601 strings sort lexicographically by date, so $gte/$lte
             # work directly on the stored "modified_at" string metadata.
-            kwargs["where"] = {
-                "$and": [
-                    {"modified_at": {"$gte": start.isoformat()}},
-                    {"modified_at": {"$lt": end.isoformat()}},
-                ]
-            }
+            where_clauses.append({"modified_at": {"$gte": start.isoformat()}})
+            where_clauses.append({"modified_at": {"$lt": end.isoformat()}})
+        kwargs: dict = {
+            "query_embeddings": [embedding],
+            "n_results": top_k,
+            "where": where_clauses[0] if len(where_clauses) == 1 else {"$and": where_clauses},
+        }
         result = await asyncio.to_thread(col.query, **kwargs)
         return _result_to_hits(result)
 
@@ -232,6 +235,7 @@ def _filter_by_filename(result: dict, needles: list[str], n: int) -> list[QueryH
             text=documents[i] or "",
             distance=0.0,
             modified_at=modified_at,
+            extraction_source=_safe_extraction_source(meta.get("extraction_source")),
         )
         best_per_path[file_path] = (chunk_index, hit)
 
@@ -262,6 +266,7 @@ def _sort_dedupe_most_recent(result: dict, n: int) -> list[QueryHit]:
             text=documents[i] or "",
             distance=0.0,
             modified_at=modified_at,
+            extraction_source=_safe_extraction_source(meta.get("extraction_source")),
         )
         items.append((modified_at, file_path, hit))
 
@@ -306,6 +311,15 @@ def _result_to_hits(result: dict) -> list[QueryHit]:
                 text=documents[i] or "",
                 distance=float(distances[i] or 0.0),
                 modified_at=modified_at,
+                extraction_source=_safe_extraction_source(meta.get("extraction_source")),
             )
         )
     return hits
+
+
+def _safe_extraction_source(raw):
+    """Coerce a metadata value to a valid ExtractionSource, defaulting to native
+    for old chunks that predate the field or for any unrecognized value."""
+    if raw in ("native", "ocr", "mixed", "filename_only"):
+        return raw
+    return "native"
