@@ -61,6 +61,11 @@ class SourcesChunk(ChatStreamChunk):
 
 
 @dataclass(frozen=True, slots=True)
+class StatusChunk(ChatStreamChunk):
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class ChatResult:
     answer: str
     sources: tuple[str, ...]

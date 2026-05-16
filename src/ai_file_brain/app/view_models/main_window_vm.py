@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from ai_file_brain.app.models.chat_turn import ChatTurn
 from ai_file_brain.core.chat import ChatService
-from ai_file_brain.core.models import SourcesChunk, TokenChunk
+from ai_file_brain.core.models import SourcesChunk, StatusChunk, TokenChunk
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,8 @@ class MainWindowViewModel(QObject):
                     turn.append_answer(chunk.text)
                 elif isinstance(chunk, SourcesChunk):
                     turn.set_sources(chunk.paths)
+                elif isinstance(chunk, StatusChunk):
+                    turn.set_status(chunk.message)
         except asyncio.CancelledError:
             turn.append_answer("\n\n[stopped]")
             raise

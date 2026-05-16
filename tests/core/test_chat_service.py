@@ -8,6 +8,7 @@ from ai_file_brain.core.chat import ChatService
 from ai_file_brain.core.models import (
     QueryHit,
     SourcesChunk,
+    StatusChunk,
     TokenChunk,
 )
 
@@ -127,6 +128,53 @@ async def test_ask_stream_yields_tokens_then_sources():
     assert tokens == ["Hel", "lo"]
     assert len(sources_chunks) == 1
     assert sources_chunks[0].paths == ("/a.txt", "/b.txt")
+
+
+@pytest.mark.asyncio
+async def test_ask_stream_emits_status_and_sources_before_first_token():
+    """Status pings + sources should arrive before any answer tokens so the UI
+    can show 'Embedding…', 'Searching…', 'Reading: a.txt, b.txt…', 'Thinking…'
+    while the LLM is still warming up."""
+    hits = [
+        QueryHit(
+            chunk_id="1",
+            file_path="/a.txt",
+            file_name="a.txt",
+            chunk_index=0,
+            text="content from a",
+            distance=0.1,
+            modified_at=datetime.now(UTC),
+        ),
+        QueryHit(
+            chunk_id="2",
+            file_path="/b.txt",
+            file_name="b.txt",
+            chunk_index=0,
+            text="content from b",
+            distance=0.2,
+            modified_at=None,
+        ),
+    ]
+    chat = ChatService(_settings(), FakeEmbedder(), FakeRepo(hits), FakeOllama(["Hi"]))
+
+    chunks = []
+    async for c in chat.ask_stream("what?"):
+        chunks.append(c)
+
+    # At least one status message and one source chunk arrive before any token.
+    first_token_idx = next(i for i, c in enumerate(chunks) if isinstance(c, TokenChunk))
+    before_token = chunks[:first_token_idx]
+    assert any(isinstance(c, StatusChunk) for c in before_token), \
+        "expected StatusChunk before first TokenChunk"
+    assert any(isinstance(c, SourcesChunk) for c in before_token), \
+        "expected SourcesChunk before first TokenChunk so files appear while LLM warms up"
+
+    # The status messages should cover the user-visible phases.
+    status_msgs = [c.message.lower() for c in chunks if isinstance(c, StatusChunk)]
+    assert any("embed" in m for m in status_msgs)
+    assert any("search" in m for m in status_msgs)
+    assert any("read" in m for m in status_msgs)
+    assert any("think" in m for m in status_msgs)
 
 
 @pytest.mark.asyncio

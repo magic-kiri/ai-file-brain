@@ -89,6 +89,15 @@ QLabel#AnswerLabel {{
     padding: 10px 14px;
     font-size: 13px;
 }}
+QLabel#StatusPill {{
+    background-color: {PALETTE['surface_alt']};
+    color: {PALETTE['text_subtle']};
+    border: 1px dashed {PALETTE['border']};
+    border-radius: 12px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-style: italic;
+}}
 QLabel#SourcesLabel {{
     color: {PALETTE['text_subtle']};
     font-size: 11px;
@@ -190,12 +199,12 @@ class _ChatTurnWidget(QFrame):
         self._question_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self._question_label)
 
-        self._answer_label = QLabel("")
-        self._answer_label.setObjectName("AnswerLabel")
-        self._answer_label.setWordWrap(True)
-        self._answer_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._answer_label.setVisible(False)
-        layout.addWidget(self._answer_label)
+        self._status_label = QLabel("")
+        self._status_label.setObjectName("StatusPill")
+        self._status_label.setWordWrap(True)
+        self._status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._status_label.setVisible(False)
+        layout.addWidget(self._status_label)
 
         self._sources_label = QLabel("")
         self._sources_label.setObjectName("SourcesLabel")
@@ -203,6 +212,13 @@ class _ChatTurnWidget(QFrame):
         self._sources_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._sources_label.setVisible(False)
         layout.addWidget(self._sources_label)
+
+        self._answer_label = QLabel("")
+        self._answer_label.setObjectName("AnswerLabel")
+        self._answer_label.setWordWrap(True)
+        self._answer_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._answer_label.setVisible(False)
+        layout.addWidget(self._answer_label)
 
         self._error_label = QLabel("")
         self._error_label.setObjectName("ErrorLabel")
@@ -213,6 +229,13 @@ class _ChatTurnWidget(QFrame):
         turn.answer_changed.connect(self._refresh_answer)
         turn.sources_changed.connect(self._refresh_sources)
         turn.error_changed.connect(self._refresh_error)
+        turn.status_changed.connect(self._refresh_status)
+        # Render any state the turn already has (e.g. status that arrived
+        # synchronously between construction and signal connection).
+        self._refresh_status()
+        self._refresh_sources()
+        self._refresh_answer()
+        self._refresh_error()
 
     def _refresh_answer(self) -> None:
         self._answer_label.setText(self._turn.answer)
@@ -233,6 +256,14 @@ class _ChatTurnWidget(QFrame):
             return
         self._error_label.setText(f"Error: {msg}")
         self._error_label.setVisible(True)
+
+    def _refresh_status(self) -> None:
+        msg = self._turn.status
+        if not msg:
+            self._status_label.setVisible(False)
+            return
+        self._status_label.setText(msg)
+        self._status_label.setVisible(True)
 
 
 class MainWindow(QWidget):

@@ -12,6 +12,7 @@ from ai_file_brain.core.models import (
     ChatStreamChunk,
     QueryHit,
     SourcesChunk,
+    StatusChunk,
     TokenChunk,
 )
 import re
@@ -123,9 +124,12 @@ class ChatService:
         window = None if recency else parse_time_intent(question)
 
         if recency is not None:
+            yield StatusChunk(message="Finding your most recent files…")
             hits = await self._vector_repo.most_recent(self._settings.top_k)
         else:
+            yield StatusChunk(message="Embedding your question…")
             embedding = await self._embedder.embed(question)
+            yield StatusChunk(message="Searching your files…")
             sem_hits = await self._vector_repo.query(
                 embedding,
                 self._settings.top_k,
@@ -155,6 +159,25 @@ class ChatService:
             yield SourcesChunk(paths=())
             return
 
+        # Emit sources EARLY so the UI can show "considering these files"
+        # while the LLM is still loading and prefilling.
+        seen_paths: list[str] = []
+        for hit in hits:
+            if hit.file_path and hit.file_path not in seen_paths:
+                seen_paths.append(hit.file_path)
+        yield SourcesChunk(paths=tuple(seen_paths))
+
+        unique_names: list[str] = []
+        for hit in hits:
+            if hit.file_name and hit.file_name not in unique_names:
+                unique_names.append(hit.file_name)
+        preview = ", ".join(unique_names[:3])
+        if len(unique_names) > 3:
+            preview += f" (+{len(unique_names) - 3} more)"
+        yield StatusChunk(
+            message=f"Reading {len(unique_names)} file(s): {preview}"
+        )
+
         user_message = _build_user_message(question, hits, window, recency)
         system_prompt = RECENCY_SYSTEM_PROMPT if recency is not None else SYSTEM_PROMPT
         messages = (
@@ -162,6 +185,8 @@ class ChatService:
             + self._history
             + [{"role": "user", "content": user_message}]
         )
+
+        yield StatusChunk(message="Thinking…")
 
         answer_parts: list[str] = []
         completed = False
@@ -189,12 +214,6 @@ class ChatService:
             max_messages = MAX_HISTORY_TURNS * 2
             if len(self._history) > max_messages:
                 self._history = self._history[-max_messages:]
-
-        seen: list[str] = []
-        for hit in hits:
-            if hit.file_path and hit.file_path not in seen:
-                seen.append(hit.file_path)
-        yield SourcesChunk(paths=tuple(seen))
 
 
 def _merge_unique(
