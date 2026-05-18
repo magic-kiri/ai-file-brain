@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -193,10 +195,18 @@ class _ChatTurnWidget(QFrame):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
 
+        # Every chat-turn label sets minWidth=0 + Ignored horizontal size policy
+        # so a long unbreakable token (URL, path) doesn't push the transcript
+        # host wider than the scroll viewport and clip the right edge.
+        def _shrinkable(label: QLabel) -> None:
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
         self._question_label = QLabel(turn.question)
         self._question_label.setObjectName("QuestionLabel")
         self._question_label.setWordWrap(True)
         self._question_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        _shrinkable(self._question_label)
         layout.addWidget(self._question_label)
 
         self._status_label = QLabel("")
@@ -204,6 +214,7 @@ class _ChatTurnWidget(QFrame):
         self._status_label.setWordWrap(True)
         self._status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._status_label.setVisible(False)
+        _shrinkable(self._status_label)
         layout.addWidget(self._status_label)
 
         self._sources_label = QLabel("")
@@ -211,6 +222,7 @@ class _ChatTurnWidget(QFrame):
         self._sources_label.setWordWrap(True)
         self._sources_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._sources_label.setVisible(False)
+        _shrinkable(self._sources_label)
         layout.addWidget(self._sources_label)
 
         self._answer_label = QLabel("")
@@ -218,12 +230,14 @@ class _ChatTurnWidget(QFrame):
         self._answer_label.setWordWrap(True)
         self._answer_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._answer_label.setVisible(False)
+        _shrinkable(self._answer_label)
         layout.addWidget(self._answer_label)
 
         self._error_label = QLabel("")
         self._error_label.setObjectName("ErrorLabel")
         self._error_label.setWordWrap(True)
         self._error_label.setVisible(False)
+        _shrinkable(self._error_label)
         layout.addWidget(self._error_label)
 
         turn.answer_changed.connect(self._refresh_answer)
@@ -244,9 +258,14 @@ class _ChatTurnWidget(QFrame):
     def _refresh_sources(self) -> None:
         if not self._turn.sources:
             self._sources_label.setVisible(False)
+            self._sources_label.setToolTip("")
             return
-        rendered = "  ·  ".join(self._turn.sources)
+        # Show basenames in the label so long paths can't push the card wider
+        # than the viewport. Full paths live in the tooltip on hover.
+        basenames = [os.path.basename(s) or s for s in self._turn.sources]
+        rendered = "  ·  ".join(basenames)
         self._sources_label.setText(f"Sources: {rendered}")
+        self._sources_label.setToolTip("\n".join(self._turn.sources))
         self._sources_label.setVisible(True)
 
     def _refresh_error(self) -> None:
@@ -343,6 +362,11 @@ class MainWindow(QWidget):
         self._status_label.setObjectName("StatusLabel")
         self._status_label.setTextFormat(Qt.TextFormat.RichText)
         self._status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Allow the label to shrink below its rich-text natural width so the
+        # Copy / Change-folder buttons stay on-screen on narrow displays.
+        self._status_label.setMinimumWidth(0)
+        self._status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._status_label.setToolTip(self._status_vm.render_tooltip())
         status_layout.addWidget(self._status_label, 1)
 
         self._copy_button = QToolButton()
@@ -466,6 +490,7 @@ class MainWindow(QWidget):
 
     def _refresh_status(self) -> None:
         self._status_label.setText(self._status_vm.render_html())
+        self._status_label.setToolTip(self._status_vm.render_tooltip())
 
 
 class _EnterToSendTextEdit(QPlainTextEdit):

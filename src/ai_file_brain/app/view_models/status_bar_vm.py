@@ -76,9 +76,10 @@ class StatusBarViewModel(QObject):
 
     def render_html(self) -> str:
         folder = self._watch_folder or "(none)"
+        folder_display = _elide_middle(folder, 50)
         return (
             f'<span style="color:#4a5568;">Watching </span>'
-            f'<span style="color:#1a202c; font-weight:500;">{_escape(folder)}</span>'
+            f'<span style="color:#1a202c; font-weight:500;">{_escape(folder_display)}</span>'
             f'<span style="color:#a0aec0;"> &nbsp;·&nbsp; </span>'
             f'<span style="color:#1a202c; font-weight:500;">{self._chunk_count}</span>'
             f'<span style="color:#4a5568;"> chunks</span>'
@@ -86,6 +87,15 @@ class StatusBarViewModel(QObject):
             f'{_dot(self._ollama_healthy)} <span style="color:#4a5568;">Ollama</span>'
             f'<span style="color:#a0aec0;"> &nbsp;·&nbsp; </span>'
             f'{_dot(self._chroma_healthy)} <span style="color:#4a5568;">Chroma</span>'
+        )
+
+    def render_tooltip(self) -> str:
+        folder = self._watch_folder or "(none)"
+        return (
+            f"Watching: {folder}\n"
+            f"{self._chunk_count} chunks indexed\n"
+            f"Ollama: {'connected' if self._ollama_healthy else 'unreachable'}\n"
+            f"Chroma: {'connected' if self._chroma_healthy else 'unreachable'}"
         )
 
 
@@ -100,3 +110,13 @@ def _escape(text: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
+
+
+def _elide_middle(text: str, max_chars: int) -> str:
+    """Trim a long string by replacing its middle with '…' so the head and tail
+    are still recognisable. Used for long watch-folder paths so the status
+    strip doesn't push the window wider than narrow office screens."""
+    if len(text) <= max_chars or max_chars < 3:
+        return text
+    keep = (max_chars - 1) // 2
+    return text[:keep] + "…" + text[-keep:]
