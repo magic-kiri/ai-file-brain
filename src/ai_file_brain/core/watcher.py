@@ -208,7 +208,9 @@ class FileWatcherService:
         self._observer.start()
         self._running = True
         logger.info("Watching %s", self._settings.watch_folder)
-        await self._initial_scan()
+        # Run the initial scan in the background so a large watch root (e.g. D:\)
+        # doesn't block the UI from coming up. Tracked in _tasks so stop() cancels it.
+        self._schedule_task(self._initial_scan())
 
     async def stop(self) -> None:
         if not self._running:
