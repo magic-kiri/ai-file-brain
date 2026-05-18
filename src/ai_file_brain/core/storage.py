@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -16,6 +17,28 @@ COLLECTION_NAME = "ai-file-brain"
 # excluded from semantic search so they don't compete with content-bearing
 # chunks. They still show up via query_by_filename_substrings and most_recent.
 _NOT_FILENAME_ONLY_CLAUSE = {"extraction_source": {"$ne": "filename_only"}}
+
+# When the watch folder changes, chunks from the previous folder stay in the DB
+# (so switching back is instant) but every query is post-filtered to chunks
+# whose file_path lives under the *current* watch folder. We over-fetch from
+# Chroma by this factor so that filter still yields top_k results when most
+# nearest neighbours are from an old folder.
+_QUERY_OVER_FETCH = 10
+_QUERY_OVER_FETCH_MAX = 200
+
+
+def _under_watch_folder(file_path: str, watch_folder: str) -> bool:
+    """True if ``file_path`` lives under ``watch_folder``.
+
+    Case-insensitive on Windows (via os.path.normcase). An empty/unset
+    watch_folder disables scoping.
+    """
+    if not watch_folder:
+        return True
+    a = os.path.normcase(os.path.normpath(file_path))
+    b = os.path.normcase(os.path.normpath(watch_folder))
+    prefix = b if b.endswith(os.sep) else b + os.sep
+    return a.startswith(prefix)
 
 
 @runtime_checkable
@@ -125,13 +148,17 @@ class ChromaVectorRepository:
             # work directly on the stored "modified_at" string metadata.
             where_clauses.append({"modified_at": {"$gte": start.isoformat()}})
             where_clauses.append({"modified_at": {"$lt": end.isoformat()}})
+        fetch_n = min(top_k * _QUERY_OVER_FETCH, _QUERY_OVER_FETCH_MAX)
         kwargs: dict = {
             "query_embeddings": [embedding],
-            "n_results": top_k,
+            "n_results": fetch_n,
             "where": where_clauses[0] if len(where_clauses) == 1 else {"$and": where_clauses},
         }
         result = await asyncio.to_thread(col.query, **kwargs)
-        return _result_to_hits(result)
+        all_hits = _result_to_hits(result)
+        folder = self._settings.watch_folder
+        scoped = [h for h in all_hits if _under_watch_folder(h.file_path, folder)]
+        return scoped[:top_k]
 
     async def most_recent(self, n: int) -> list[QueryHit]:
         """Return up to ``n`` chunks, sorted by ``modified_at`` desc, deduped by file_path.
@@ -148,7 +175,7 @@ class ChromaVectorRepository:
             col.get,
             include=["metadatas", "documents"],
         )
-        return _sort_dedupe_most_recent(result, n)
+        return _sort_dedupe_most_recent(result, n, self._settings.watch_folder)
 
     async def query_by_filename_substrings(
         self, substrings: list[str], n: int
@@ -171,7 +198,7 @@ class ChromaVectorRepository:
             col.get,
             include=["metadatas", "documents"],
         )
-        return _filter_by_filename(result, needles, n)
+        return _filter_by_filename(result, needles, n, self._settings.watch_folder)
 
     async def has_path(self, file_path: str) -> bool:
         col = self._require()
@@ -199,7 +226,9 @@ class ChromaVectorRepository:
             return False
 
 
-def _filter_by_filename(result: dict, needles: list[str], n: int) -> list[QueryHit]:
+def _filter_by_filename(
+    result: dict, needles: list[str], n: int, watch_folder: str
+) -> list[QueryHit]:
     ids = result.get("ids") or []
     documents = result.get("documents") or [""] * len(ids)
     metadatas = result.get("metadatas") or [{}] * len(ids)
@@ -212,6 +241,8 @@ def _filter_by_filename(result: dict, needles: list[str], n: int) -> list[QueryH
         file_name = str(meta.get("file_name", ""))
         file_path = str(meta.get("file_path", ""))
         if not file_name or not file_path:
+            continue
+        if not _under_watch_folder(file_path, watch_folder):
             continue
         name_lower = file_name.lower()
         if not any(needle in name_lower for needle in needles):
@@ -242,7 +273,9 @@ def _filter_by_filename(result: dict, needles: list[str], n: int) -> list[QueryH
     return [hit for _index, hit in best_per_path.values()][:n]
 
 
-def _sort_dedupe_most_recent(result: dict, n: int) -> list[QueryHit]:
+def _sort_dedupe_most_recent(
+    result: dict, n: int, watch_folder: str
+) -> list[QueryHit]:
     ids = result.get("ids") or []
     documents = result.get("documents") or [""] * len(ids)
     metadatas = result.get("metadatas") or [{}] * len(ids)
@@ -258,6 +291,8 @@ def _sort_dedupe_most_recent(result: dict, n: int) -> list[QueryHit]:
         except ValueError:
             continue
         file_path = str(meta.get("file_path", ""))
+        if not _under_watch_folder(file_path, watch_folder):
+            continue
         hit = QueryHit(
             chunk_id=chunk_id,
             file_path=file_path,

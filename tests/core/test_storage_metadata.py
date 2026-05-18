@@ -98,3 +98,94 @@ async def test_filechunk_default_extraction_source_is_native():
         modified_at=now,
     )
     assert chunk.extraction_source == "native"
+
+
+class _ScopingStubCollection:
+    """Returns a fixed mix of in-folder and out-of-folder chunks regardless of query."""
+
+    def __init__(self, watch_folder: str) -> None:
+        from pathlib import Path as _Path
+
+        now = datetime.now(UTC).isoformat()
+        self._inside = {
+            "id": "inside-1",
+            "file_path": str(_Path(watch_folder) / "keep.txt"),
+            "file_name": "keep.txt",
+            "modified_at": now,
+        }
+        self._outside_d = {
+            "id": "old-d-1",
+            "file_path": r"D:\old\stale.txt",
+            "file_name": "stale.txt",
+            "modified_at": now,
+        }
+
+    def _meta(self, entry):
+        return {
+            "file_path": entry["file_path"],
+            "file_name": entry["file_name"],
+            "chunk_index": 0,
+            "modified_at": entry["modified_at"],
+            "created_at": entry["modified_at"],
+            "extraction_source": "native",
+        }
+
+    def query(self, query_embeddings, n_results, where=None):
+        entries = [self._outside_d, self._inside] * (n_results // 2 + 1)
+        entries = entries[:n_results]
+        return {
+            "ids": [[e["id"] for e in entries]],
+            "documents": [["body" for _ in entries]],
+            "metadatas": [[self._meta(e) for e in entries]],
+            "distances": [[0.1 for _ in entries]],
+        }
+
+    def get(self, include=None, where=None, limit=None):
+        entries = [self._outside_d, self._inside]
+        return {
+            "ids": [e["id"] for e in entries],
+            "documents": ["body" for _ in entries],
+            "metadatas": [self._meta(e) for e in entries],
+        }
+
+
+@pytest.mark.asyncio
+async def test_query_scopes_results_to_current_watch_folder(tmp_path):
+    """Old chunks from a previous watch folder must not pollute results."""
+    settings = AiFileBrainSettings()
+    settings.watch_folder = str(tmp_path)
+    repo = ChromaVectorRepository(settings)
+    repo._collection = _ScopingStubCollection(settings.watch_folder)
+
+    hits = await repo.query([0.1, 0.2, 0.3], top_k=3)
+
+    assert hits, "expected at least one in-folder hit"
+    assert all(str(tmp_path) in h.file_path for h in hits)
+    assert not any(h.file_path.startswith(r"D:\old") for h in hits)
+
+
+@pytest.mark.asyncio
+async def test_most_recent_scopes_to_current_watch_folder(tmp_path):
+    settings = AiFileBrainSettings()
+    settings.watch_folder = str(tmp_path)
+    repo = ChromaVectorRepository(settings)
+    repo._collection = _ScopingStubCollection(settings.watch_folder)
+
+    hits = await repo.most_recent(10)
+
+    assert hits, "expected at least one in-folder hit"
+    assert all(str(tmp_path) in h.file_path for h in hits)
+
+
+@pytest.mark.asyncio
+async def test_filename_substring_scopes_to_current_watch_folder(tmp_path):
+    settings = AiFileBrainSettings()
+    settings.watch_folder = str(tmp_path)
+    repo = ChromaVectorRepository(settings)
+    repo._collection = _ScopingStubCollection(settings.watch_folder)
+
+    # Both stub files contain a common substring; only the in-folder one should win.
+    hits = await repo.query_by_filename_substrings(["txt"], n=10)
+
+    assert hits, "expected at least one in-folder hit"
+    assert all(str(tmp_path) in h.file_path for h in hits)
